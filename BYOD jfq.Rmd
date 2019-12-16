@@ -1,0 +1,164 @@
+---
+title: "BYOD Project"
+author: "Jorge Quintanilla"
+date: "12/13/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dbplyr)
+library(tidyverse)
+library(car)
+library(ggplot2)
+library(esquisse)
+library(caret)
+library(boot)
+```
+
+```{r}
+WideSpread<-read.csv("Widespread.csv")
+glimpse(WideSpread)
+```
+
+```{r}
+##Visualization in ggplot2 for Presence vs Days
+ggplot(WideSpread) +
+  aes(x = Days, y = presence) +
+  geom_area(size = 1L) +
+  theme_minimal()
+```
+
+```{r}
+#Logistic Model only presence/days
+myLogit<-glm(presence~Days,family=binomial(link="logit"), data= WideSpread)
+summary(myLogit)
+plot(myLogit)
+```
+
+```{r}
+xweight <- seq(1, 6, .1)
+yweight <- predict(myLogit, list(Days = xweight),type="response")
+
+####RUN THIS TWO LINES TOGETHER
+plot(WideSpread$Days, WideSpread$presence, pch = 16, xlab = "Days", ylab = "Presence" )
+lines(xweight, yweight) 
+```
+
+
+```{r}
+myLogit2<-glm(presence~Initial.Inoculum, family=binomial(link="logit"), data=  WideSpread)
+summary(myLogit2)
+#Initial Inoculum is not significant
+
+```
+
+```{r}
+## Logistic model with initial inoculum variable
+myLogit3<-glm(presence~Initial.Inoculum + Days, family=binomial(link = "logit"), data=WideSpread)
+summary(myLogit3)
+confint(myLogit3)
+#Initial inoculum still not significant - not included in the final model
+##Model Chosen = glm(presence~days, data=WideSpread)
+```
+
+```{r}
+#Predictions for the probability of detection
+WideSpread$Pred <- predict(myLogit,type="response")
+##Visualization in ggplot2 for predicted vs days
+ggplot(WideSpread) +
+  aes(x = Days, y = Pred) +
+  geom_line(size = 1L, colour = "#0c4c8a") +
+  theme_minimal()
+```
+
+
+```{r}
+#xdays<-seq(1, 6, 0.1)
+#ypro<-WideSpread$Pred
+#plot(WideSpread$Days, WideSpread$Pred, xlab="Days", ylab="Pred Prob")
+#lines(xdays, ypro)
+```
+
+```{r}
+##Visualization in ggplot2 for predicted vs days
+ggplot(WideSpread) +
+  aes(x = Days, y = Pred) +
+  geom_line(size = 1L, colour = "#0c4c8a") +
+  theme_minimal()
+```
+```{r}
+WideSpread2<-WideSpread[,-c(1,5)]
+```
+
+```{r}
+###Crossvalidation - Repeated sampling using bootstrapping
+#Checkfor the code in GOF_1 line 173
+WideSpread2$presence<-as.factor(WideSpread2$presence)
+
+# Split the data into training and test set and evaluate its performance
+set.seed(123)
+training.samples <- WideSpread2$presence %>%
+  createDataPartition(p = 0.67, list = FALSE)
+train.data  <- WideSpread2[training.samples, ]
+test.data <- WideSpread2[-training.samples, ]
+```
+
+
+```{r}
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv", 
+                              number = 10, repeats = 3)
+# Train the model
+model <- train(presence ~., data = train.data, method = "glm",
+               trControl = train.control,family=binomial("logit"))
+
+# Summarize the results
+print(model)
+```
+
+
+```{r}
+#Create the confusion matrix
+#predictions <- model %>% predict(test.data)
+predictions2 = predict(model, newdata=test.data)
+confusionMatrix(data=predictions2, test.data$presence)  
+ColPred<-as.data.frame(predictions2)
+```
+```{r}
+set.seed(123)
+train.control2 <- trainControl(method = "repeatedcv", 
+                              number = 10, repeats = 100)
+# Train the model
+model2 <- train(presence ~., data = train.data, method = "glm",
+               trControl = train.control2,family=binomial("logit"))
+
+# Summarize the results
+print(model2)
+```
+
+```{r}
+predictions3 = predict(model2, newdata=test.data)
+confusionMatrix(data=predictions3, test.data$presence) 
+```
+
+
+```{r}
+probdect<-as.data.frame(predict(model2, WideSpread2,type="prob"))
+WideSpread3<-cbind(WideSpread, probdect)
+colnames(WideSpread3)[colnames(WideSpread3)=="0"] <- "ProbDetect 0"
+colnames(WideSpread3)[colnames(WideSpread3)=="1"] <- "ProbDetect 1"
+```
+
+```{r}
+p<-ggplot(WideSpread3) +
+  aes(x = Days, y = WideSpread3$`ProbDetect 1`) +
+  geom_line(size = 1L, colour = "#0c4c8a") +
+  theme_minimal()
+p
+```
+
