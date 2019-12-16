@@ -1,0 +1,409 @@
+---
+title: "Collaborative Project jfq"
+author: "Jorge Quintanilla"
+date: "12/13/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(emmeans)
+library(dplyr)
+library(ggplot2)
+library(esquisse)
+```
+**Data Cleaning**
+```{r}
+cdap <- read.table("CollabFile.csv", sep=",",header= TRUE,na.strings = "NA") #read in the file
+glimpse(cdap) #check the structure
+cdap.cl <- cdap[,1:7] #remove the genotype columns
+cdapT<-cdap.cl
+glimpse(cdap.cl) #check the removal
+```
+
+```{r}
+#recode E and W as N and S using map
+#south is: elkville, belleville, perry
+#north is: hampshire, urbana, neoga
+table(cdap.cl$Reg, cdap.cl$Loc) #south/north is not equivalent to east/west
+cdap.cl$Reg <- as.character(cdap.cl$Reg)
+cdap.cl$Loc <- as.character(cdap.cl$Loc)
+cdap.cl[cdap.cl$Loc == "Belleville_2019", "Reg"] <- "south"
+cdap.cl[cdap.cl$Loc == "Elkville_2019", "Reg"] <- "south"
+cdap.cl[cdap.cl$Loc == "Perry_2019", "Reg"] <- "south"
+cdap.cl[cdap.cl$Loc == "Hampshire_2019", "Reg"] <- "north"
+cdap.cl[cdap.cl$Loc == "Urbana_2018", "Reg"] <- "north"
+cdap.cl[cdap.cl$Loc == "Neoga_2018", "Reg"] <- "north"
+table(cdap.cl$Reg, cdap.cl$Loc)
+```
+
+```{r}
+##Rename the blank treatment
+table(cdap.cl$SeedTreatment) #blank variable is supposed to be No treatment
+#Outcome was 18 blank variables, and by taking a look at the dataset, there is one "SeedTreatment" in USG_3197
+cdap.cl$SeedTreatment <- as.character(cdap.cl$SeedTreatment)
+cdap.cl[cdap.cl$SeedTreatment == "", "SeedTreatment"] <- "NTRT"
+cdap.cl[cdap.cl$SeedTreatment == "E", ]
+cdap.cl[cdap.cl$EntryID == "Becks_Hybrids_Beck_726", ] #this data point is going to cause estimability issues
+cleanCollab <- cdap.cl[cdap.cl$SeedTreatment != "E", ]
+```
+
+```{r}
+#refactor for analysis
+cleanCollab$Reg <- as.factor(cleanCollab$Reg)
+cleanCollab$Loc <- as.factor(cleanCollab$Loc)
+cleanCollab$SeedTreatment <- as.factor(cleanCollab$SeedTreatment)
+```
+
+```{r}
+#data cleaning for location and region
+table(cleanCollab$Loc)
+Belleville <- cleanCollab[cleanCollab$Loc == "Belleville_2019", ]
+Elkville <- cleanCollab[cleanCollab$Loc == "Elkville_2019", ]
+Hampshire <- cleanCollab[cleanCollab$Loc == "Hampshire_2019", ]
+Neoga <- cleanCollab[cleanCollab$Loc == "Neoga_2018", ]
+Perry <- cleanCollab[cleanCollab$Loc == "Perry_2019", ]
+Urbana <- cleanCollab[cleanCollab$Loc == "Urbana_2018", ]
+north <- cleanCollab[cleanCollab$Reg == "north", ]
+south <- cleanCollab[cleanCollab$Reg == "south", ]
+```
+
+**This step provides a long output, not valuable for analysis, just to prove myself It's unbalanced**
+```{r}
+#model based on data structure
+#lm.df <- lm(Estimate ~ Reg/Loc + Company/Variety + SeedTreatment, data = cleanCollab)
+#summary(lm.df)
+#not really appropriate given the ultimately unbalanced design
+```
+**Exploratory Analysis*
+```{r}
+boxplot(cleanCollab$Estimate~cleanCollab$Loc, xlab="location", ylab="Yield", main="Yield by Location")
+###Run this line together
+hist(cleanCollab$Estimate ,main="Density plot of Yield", prob=T, col="navy")
+lines(density((cleanCollab$Estimate)), col="orange", lwd=3)
+```
+
+
+```{r}
+ggplot(north) +
+ aes(x = Loc, y = Estimate, fill = Company) +
+ geom_boxplot() +
+ scale_fill_hue() +
+ theme_minimal()
+
+ggplot(data=north, aes(x=Estimate, group=Company))+
+   geom_density(adjust=1.5, fill= "tomato") +
+   facet_wrap(~Company) +
+   xlab("Yield estimate") +
+   theme(legend.position = "none",
+         panel.spacing = unit(0.1, "lines"),
+         axis.ticks.x=element_blank())
+```
+
+
+```{r}
+ggplot(south) +
+ aes(x = Loc, y = Estimate, fill = Company) +
+ geom_boxplot() +
+ scale_fill_hue() +
+ theme_minimal()
+
+ggplot(data=south, aes(x=Estimate, group=Company))+
+   geom_density(adjust=1.5, fill= "tomato") +
+   facet_wrap(~Company) +
+   xlab("Yield estimate") +
+   theme(legend.position = "none",
+         panel.spacing = unit(0.1, "lines"),
+         axis.ticks.x=element_blank())
+```
+**MANY OF THE LS MEANS COMPARISON PLOTS WERE UNREADABLE, HENCE, THEY WERE NOT INCLUDED IN THE FINAL REPORT, INSTEAD A TABLE WITH SUMMARIZED RESULTS WAS REPORTED**
+```{r}
+###Objective 1. Evaluate Location effect
+mylm1 <- lm(Estimate ~ Loc, data = cleanCollab)
+anova(mylm1)
+summary(mylm1) #r2 Loc = 0.79
+plot(mylm1)
+AvLoc <- emmeans(mylm1, specs = "Loc", adjust = "tukey")
+plot(AvLoc, comparisons = TRUE, horizontal = FALSE)
+pwpp(AvLoc, comparisons = TRUE)
+```
+
+```{r}
+###Objective 2: Evaluate Company effect
+mylm2 <- lm(Estimate ~ Company, data = cleanCollab)
+summary(mylm2) #some companies have significant relationshps with yield
+anova(mylm2) #overall the effect of company is significant
+
+OvPerf<- cleanCollab%>%
+  group_by(Company, Variety)%>%
+  summarize(mean=mean(Estimate))
+OvPerf 
+#The outcome of this is DeRaedt_Seed,DeRaedt_24,106.62373 as the best
+#The outcome of this is Go_Wheat,EXP18-1,79.82095 as the worst
+
+#Across regions
+CompMean<-plot(emmeans(mylm2, specs = "Company", adjust = "tukey"), comparisons = TRUE)
+CompMean #The best is DeRaedt_Seed since the variability is low, 
+         #the worst seems to be GoWheat as well, since the mean and extreme values indicates underperformance compared to other companies, that may have higher upper limit and mean 
+CompMean2<-pwpp(emmeans(mylm2, specs = "Company", adjust = "tukey"), comparisons = TRUE)
+CompMean2 #This is for the significance of each company
+table(cdap.cl$Reg, cdap.cl$Company) ### Some companies belong in different regions
+TukeyHSD(aov(Estimate ~ Company, data = cleanCollab))
+```
+
+```{r}
+#lm of each location
+Bellm <- lm(Estimate ~ Company, data = Belleville)
+Elklm <- lm(Estimate ~ Company, data = Elkville)
+Hamplm <- lm(Estimate ~ Company, data = Hampshire)
+Neolm <- lm(Estimate ~ Company, data = Neoga)
+Pelm <- lm(Estimate ~ Company, data = Perry)
+Urblm <- lm(Estimate ~ Company, data = Urbana)
+
+##Run the ANOVA for the lm for each location
+anova(Bellm) #no sig
+anova(Elklm) #sig
+anova(Hamplm) #sig
+anova(Neolm) #no sig
+anova(Pelm) #no sig
+anova(Urblm) #sig
+summary(Bellm)
+```
+
+```{r}
+OvPerfLoc2<- cleanCollab%>%
+  group_by(Loc, Company)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange()
+summarise(OvPerfLoc2, max(mean))
+summarise(OvPerfLoc2, min(mean))
+#Worst/Best Company in each location
+#Belleville= ProHarvest/Pioneer
+#Elkville= ProHarvest/KWS_Cereals
+#Hampshire= Kratz_Farms/Pioneer
+#Neoga= Miller_Bros_Farm_and_Fert/Croplan
+#Perry= ProHarvest/Pioneer
+#Urbana=Kratz_Farms/Pioneer
+```
+
+```{r}
+##Calculate the  lsMeans
+MBelleville <- emmeans(Bellm, specs = "Company", adjust = "tukey")
+MElkville <- emmeans(Elklm, specs = "Company", adjust = "tukey")
+MHampshire <- emmeans(Hamplm, specs = "Company", adjust = "tukey")
+MNeoga <- emmeans(Neolm, specs = "Company", adjust = "tukey")
+MPerry <- emmeans(Pelm, specs = "Company", adjust = "tukey")
+MUrbana <- emmeans(Urblm, specs = "Company", adjust = "tukey")
+
+
+##Plot the lsMeans
+pwpp(MBelleville, comparisons = TRUE, ylab = "Company of Belleville")
+pwpp(MElkville, comparisons = TRUE, ylab = "Company of Elkville")
+pwpp(MHampshire, comparisons = TRUE, ylab = "Company of Hampshire")
+pwpp(MNeoga, comparisons = TRUE, ylab = "Company of Neoga")
+pwpp(MPerry, comparisons = TRUE, ylab = "Company of Perry")
+pwpp(MUrbana, comparisons = TRUE, ylab = "Company of Urbana")
+```
+
+```{r}
+###Objective 3: Evaluate the variety 
+#variety across region
+mylm3 <- lm(Estimate ~ Variety, data = cleanCollab)
+summary(mylm3) #level of region has sig effect on yield
+anova(mylm3) #variety does not have sig effect on yield
+plot(mylm3)
+plot(emmeans(mylm3, specs = "Variety", adjust = "tukey"), comparisons = TRUE)
+pwpp(emmeans(mylm3, specs = "Variety", adjust = "tukey"), comparisons = TRUE)
+```
+
+
+```{r}
+VarPerf<-cleanCollab%>%
+  group_by(Reg, EntryID)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange(mean)
+
+VarPerf2<-cleanCollab%>%
+  group_by(EntryID)%>% #In EntryID There is both the company and the variety 
+  summarise(mean=mean(Estimate))%>%
+  arrange(mean)
+
+VarPerf3<-cleanCollab%>%
+  group_by(Variety)%>%
+  summarise(mean=mean(Estimate))%>%
+  arrange(mean)
+
+summarise(VarPerf3, max(mean))
+summarise(VarPerf2, max(mean))
+summarise(VarPerf2, min(mean))
+#Worst/Best  varieties across regions
+#Go_Wheat and DeRaedt_Seed
+#####Check
+#North= Hoffman_Seed var. H7W17/KWS_Cereals var. KWS19X03
+#South= Proharvest Var. 317/Croplan var. CP9606
+```
+These linear models and ANOVA were performed, but the main result was a perfect fit, which is unreliable. However, variety was significant at each location accordingly to the analysis of variance.
+
+```{r}
+#variety by location
+#vlm <- lm(Estimate ~ Variety + Loc, data = cleanCollab)
+#vBellm <- lm(Estimate ~ Variety, data = Belleville)
+#vElklm <- lm(Estimate ~ Variety, data = Elkville)
+#vHamplm <- lm(Estimate ~ Variety, data = Hampshire)
+#vNeolm <- lm(Estimate ~ Variety, data = Neoga)
+#vPelm <- lm(Estimate ~ Variety, data = Perry)
+#vUrblm <- lm(Estimate ~ Variety, data = Urbana)
+
+#anova(vlm)
+#anova(vBellm) #sig
+#anova(vElklm) #sig
+#anova(vHamplm) #sig
+#anova(vNeolm) #sig
+#anova(vPelm) #sig
+#anova(vUrblm) #sig
+```
+
+```{r}
+OvPerfBel<-Belleville %>%
+  group_by(Loc, EntryID)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange(mean)
+OvPerfBel
+
+OvPerfElk<- Elkville%>%
+  group_by(Loc, EntryID)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange(mean)
+OvPerfElk
+OvPerfHamp<- Hampshire%>%
+  group_by(Loc, EntryID)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange(mean)
+OvPerfHamp
+OvPerfNeo<- Neoga%>%
+  group_by(Loc, EntryID)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange(mean)
+OvPerfNeo
+OvPerfPe<- Perry%>%
+  group_by(Loc, EntryID)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange(mean)
+OvPerfPe
+OvPerfUrb<- Urbana%>%
+  group_by(Loc, EntryID)%>%
+  summarize(mean=mean(Estimate))%>%
+  arrange(mean)
+OvPerfUrb
+
+#Worst/Best Variety in each location
+#Belleville= ProHarvest_317/KWS_Cereals_KWS19X07
+#Elkville= ProHarvest_286/KWS_Cereals_KWS19X09
+#Hampshire= Kratz_Farms_KF_15334/KWS_Cereals_KWS19X03
+#Neoga= GROWMARK_FS_604/Hoffman_Seed_H7W18
+#Perry= Kratz_Farms_KF_15334/AgriMAXX_495
+#Urbana=LEWIS_851/GROWMARK_WX18C
+
+```
+
+```{r}
+###Objective 4: Evaluate Regional Effects
+mylm4 <- lm(Estimate ~ Reg, data = cleanCollab)
+summary(mylm4) #Region alone explains 16% of variance
+anova(mylm4)
+mylm4.1 <- lm(Estimate ~ Reg + Company, data = cleanCollab)
+anova(mylm4.1)
+summary(mylm4.1) #Together with company explain 19% of variance
+```
+
+```{r}
+Northlm <- lm(Estimate ~ Company, data = north)
+Southlm <- lm(Estimate ~ Company, data = south)
+
+MNorth <- emmeans(Northlm, specs = "Company", adjust = "tukey")
+MSouth <- emmeans(Southlm, specs = "Company", adjust = "tukey")
+pwpp(MNorth, comparisons = TRUE) ##Six or seven of them seem sig for North Reg
+pwpp(MSouth, comparisons = TRUE) ##Seems not sig for SOUTH
+##Best Company within Region= N:Moiner_Seed/S:DeRaedt_Seed
+##Worst Company within Region= N= Miller_Bros_Farm_and_Fert/S: Proharvest
+
+```
+
+
+```{r}
+#linear model for north/south company's variety
+NorthVarlm <- lm(Estimate ~ Variety, data = north)
+SouthVarlm <- lm(Estimate ~ Variety, data = south)
+MNorthVar <- emmeans(NorthVarlm, specs = "Variety", adjust = "tukey")
+MSouthVar <- emmeans(SouthVarlm, specs = "Variety", adjust = "tukey")
+pwpp(MNorthVar, comparisons = TRUE) #No sig for north/south
+pwpp(MSouthVar, comparisons = TRUE)
+#KWS19X03 Best in North/H7W17 Worst in North 
+#CP9606 Best in South/ 317 Worst in South
+```
+
+```{r}
+###Objective 5: Evaluate Seed Treatment 
+#lm for ST = significant at 0.03
+mylm5 <- lm(Estimate ~ SeedTreatment, data = cleanCollab)
+anova(mylm5) #significant
+pwpp(emmeans(mylm5, specs = "SeedTreatment", adjust = "tukey"), comparisons = TRUE)
+TukeyHSD(aov(Estimate ~ SeedTreatment, data = cleanCollab))
+summary(mylm5) #Significant for no treatment, however, Treatment C has the higher positive effect, but it is not significant
+```
+
+```{r}
+#Model Selection - Using stepwise selection
+test_int <- lm(Estimate~1, data=cleanCollab)
+test_full <- lm(Estimate~Reg+Loc+Company+Variety+SeedTreatment, data=cleanCollab)
+SWmodel<-step(test_int,scope = list(upper = formula(test_full), lower = formula(test_int)), direction = 'both')
+summary(SWmodel)$terms
+### Best model= Estimate~Loc+Variety, data=cleanCollab)
+```
+
+```{r}
+###Objective 6: Predictions
+mylm6 <- lm(Estimate ~ Loc + Variety, data = cleanCollab)
+summary(mylm6) #Hampshire i the max
+summary(mylm6)$coef
+max(coef(mylm6)[grep("Variety*", names(coef(mylm6)))]) #VarietyH7W18
+##Hampshire and variety H7W8 are the best for maximum yield overall
+mylm6.1 <- lm(Estimate ~ Loc + Variety+ SeedTreatment, data = cleanCollab)
+summary(mylm6.1) #Not justified for treat the seed.
+```
+
+```{r}
+mylm7<-lm(Estimate~Loc, data=north)
+NorthLoc<-emmeans(mylm7, specs = "Loc", adjust = "tukey") #Hampshire is best location in North
+plot(NorthLoc, comparisons = TRUE, horizontal = FALSE)
+##We know the best variety of the North = KWS_Cereals var. KWS19X03
+```
+
+```{r}
+mylm8<-lm(Estimate~Loc, data=south)
+SouthLoc<-emmeans(mylm8, specs = "Loc", adjust = "tukey") #Elkville is best location in South
+plot(SouthLoc, comparisons = TRUE, horizontal = FALSE)
+##We know the best variety of the South = Croplan var. CP9606
+```
+
+```{r}
+#Predictions for North
+Northmylm6.2 <- lm(Estimate ~ Loc + Variety, data = north)
+BNorth<-data.frame(Loc="Hampshire_2019", Variety="KWS19X03")
+predict(Northmylm6.2, BNorth)
+```
+
+```{r}
+#Predictions for South
+Southmylm6.2 <- lm(Estimate ~ Loc + Variety, data = south)
+BSouth<-data.frame(Loc="Elkville_2019", Variety="CP9606")
+predict(Southmylm6.2, BSouth)
+```
+
+
+
+
+
